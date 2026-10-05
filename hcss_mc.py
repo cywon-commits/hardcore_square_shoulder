@@ -187,13 +187,15 @@ def sweep(s, box, lam, beta, P, dmax, dbox, dshear, n_pairs, seed_state):
 
 
 # ----------------------------------------------------------------------------- initial states
-def lattice_state(kind, lam, N_target, scale=1.003):
+def lattice_state(kind, lam, N_target, scale=1.003, seed=0):
     """Return (s, box=(a,b,c)) for kind in {'A', 'B', 'rows', 'fluid'}.
     A    : triangular lattice, spacing lam*scale
     B    : thin-rhombus lattice (30 deg rhombi, side lam*scale)  -> pure B tiles at lam*
     rows : periodic row stacking T R+ R- T R+ R- (triangles : rhombi = 1 : 1, x_A = 1/3,
            same composition and density as the predicted 12-fold state)
     fluid: random sequential addition at density 0.25
+    hexlat: periodic lattice of 30-degree hexagons with random interior positions (a random tiling with
+           x_A = 1/3 and density rho_12; every interior particle is flippable)
     """
     L = lam * scale
     if kind == "A":
@@ -229,6 +231,27 @@ def lattice_state(kind, lam, N_target, scale=1.003):
         pts = np.array(pts)
         box = np.array([n * L, (x0 % L) if False else 0.0, y])
         # total shift per 6-row unit is exactly L, so the stack is periodic with zero shear
+    elif kind == "hexlat":
+        # lattice of 30-degree hexagons (edge vectors u, v, w at 0, 30, 60 deg), translation vectors
+        # T1 = u + v, T2 = v + w; per cell: vertices 0 and u, interior at v or u + w (random -> random tiling)
+        d = math.radians
+        u = L * np.array([1.0, 0.0]); v = L * np.array([math.cos(d(30)), math.sin(d(30))])
+        w = L * np.array([math.cos(d(60)), math.sin(d(60))])
+        T1 = u + v; T2 = v + w
+        n1 = max(3, int(round(math.sqrt(N_target / 6.0))))
+        n2 = max(6, int(round(N_target / (3 * n1))))
+        rng = np.random.default_rng(seed)
+        pts = []
+        for i in range(n1):
+            for j in range(n2):
+                O = i * T1 + j * T2
+                pts += [O, O + u, O + (v if rng.random() < 0.5 else u + w)]
+        pts = np.array(pts)
+        A1 = n1 * T1; A2 = n2 * T2
+        th = math.atan2(A1[1], A1[0]); R = np.array([[math.cos(-th), -math.sin(-th)], [math.sin(-th), math.cos(-th)]])
+        pts = pts @ R.T; A1 = R @ A1; A2 = R @ A2
+        b = A2[0] - round(A2[0] / A1[0]) * A1[0]
+        box = np.array([A1[0], b, A2[1]])
     elif kind == "fluid":
         rho = 0.25
         side = math.sqrt(N_target / rho)
@@ -263,3 +286,227 @@ def cart(s, box):
 def box_matrix(box):
     a, b, c = box
     return np.array([[a, b], [0.0, c]])  # columns = box vectors
+
+
+# ============================================================================ pilot 2 additions
+# ---------------------------------------------------------------------------- sweep with image tracking
+@njit(cache=True)
+def sweep_img(s, img, box, lam, beta, P, dmax, dbox, dshear, n_pairs, seed_state):
+    """Same as sweep() but also tracks periodic image counters img (N,2) for unwrapped trajectories."""
+    np.random.seed(seed_state)
+    a, b, c = box[0], box[1], box[2]
+    N = s.shape[0]
+    nx, ny, count, members, cell_of, slot_of = build_cells(s, a, b, c, lam)
+    acc_p = 0
+    for t in range(N):
+        i = np.random.randint(N)
+        dx = dmax * (2.0 * np.random.random() - 1.0)
+        dy = dmax * (2.0 * np.random.random() - 1.0)
+        dsy = dy / c
+        dsx = (dx - b * dsy) / a
+        rx = s[i, 0] + dsx
+        ry = s[i, 1] + dsy
+        fx = math.floor(rx); fy = math.floor(ry)
+        nsx = rx - fx; nsy = ry - fy
+        nnew = local_count(i, nsx, nsy, s, a, b, c, lam, nx, ny, count, members)
+        if nnew < 0:
+            continue
+        nold = local_count(i, s[i, 0], s[i, 1], s, a, b, c, lam, nx, ny, count, members)
+        dU = nnew - nold
+        if dU <= 0 or np.random.random() < math.exp(-beta * dU):
+            s[i, 0] = nsx; s[i, 1] = nsy
+            img[i, 0] += int(fx); img[i, 1] += int(fy)
+            newc = (int(nsx * nx) % nx) + nx * (int(nsy * ny) % ny)
+            _move_cell(i, newc, count, members, cell_of, slot_of)
+            n_pairs += dU
+            acc_p += 1
+    acc_b = 0
+    na = a * math.exp(dbox * (2.0 * np.random.random() - 1.0))
+    nc = c * math.exp(dbox * (2.0 * np.random.random() - 1.0))
+    nb = b + dshear * (2.0 * np.random.random() - 1.0)
+    w1, w2 = perp_widths(na, nb, nc)
+    if w1 > 3.0 * lam and w2 > 3.0 * lam and abs(nb) <= 0.5 * na:
+        V = a * c; nV = na * nc
+        nn = total_count(s, na, nb, nc, lam)
+        if nn >= 0:
+            arg = -beta * ((nn - n_pairs) + P * (nV - V)) + (N + 1) * math.log(nV / V)
+            if arg >= 0 or np.random.random() < math.exp(arg):
+                box[0], box[1], box[2] = na, nb, nc
+                n_pairs = nn
+                acc_b = 1
+    return n_pairs, acc_p, acc_b
+
+
+# ---------------------------------------------------------------------------- 30-degree hexagon flip
+# Geometry (lam* = 2cos15): interior particle i with three L-neighbours r0, r2, r4 (relative vectors);
+# the other three hexagon vertices sit at r0+r2, r0+r4, r2+r4.  The alternative filling puts i at
+# x' = x + (r0 + r2 + r4)  = point reflection of x through the centre of the six boundary particles.
+# Proposal: choose i uniformly, choose one of its n_old candidate hexagons uniformly, reflect through the
+# centre C computed from the six boundary positions.  Reverse move must find the same boundary set
+# (else reject).  Acceptance min(1, n_old/n_new * exp(-beta dU)).  Jacobian of a point reflection = 1.
+MAXNB = 96
+MAXHEX = 16
+
+
+@njit(cache=True)
+def _neigh(i, x0, x1, s, a, b, c, rmax, nx, ny, count, members, ids, rel):
+    """collect particles j != i within rmax of point (x0,x1) [fractional]; relative cartesian vectors."""
+    r2 = rmax * rmax
+    cx = int(x0 * nx) % nx; cy = int(x1 * ny) % ny
+    m = 0
+    for ox in range(-2, 3):
+        for oy in range(-2, 3):
+            ci = ((cx + ox) % nx) + nx * ((cy + oy) % ny)
+            for k in range(count[ci]):
+                j = members[ci, k]
+                if j == i:
+                    continue
+                dsx = s[j, 0] - x0; dsy = s[j, 1] - x1
+                dsx -= math.floor(dsx + 0.5); dsy -= math.floor(dsy + 0.5)
+                dx = a * dsx + b * dsy; dy = c * dsy
+                best = dx * dx + dy * dy; bx = dx
+                for kk in (-1, 1):
+                    ddx = dx + kk * a
+                    if ddx * ddx + dy * dy < best:
+                        best = ddx * ddx + dy * dy; bx = ddx
+                if best < r2 and m < MAXNB:
+                    ids[m] = j; rel[m, 0] = bx; rel[m, 1] = dy; m += 1
+    return m
+
+
+@njit(cache=True)
+def _angdiff(t1, t2):
+    d = t2 - t1
+    while d < 0:
+        d += 2 * math.pi
+    while d >= 2 * math.pi:
+        d -= 2 * math.pi
+    return d
+
+
+@njit(cache=True)
+def find_hexagons(i, x0, x1, s, a, b, c, lam, nx, ny, count, members, tl, tu, tp, tang, hex_ids, hex_C):
+    """Candidate flip hexagons for particle i placed at fractional (x0,x1).
+    Returns number found; hex_ids[k,:6] = sorted boundary ids, hex_C[k,:] = 2*centre (relative, cartesian)."""
+    ids = np.empty(MAXNB, np.int64); rel = np.empty((MAXNB, 2))
+    m = _neigh(i, x0, x1, s, a, b, c, math.sqrt(3.0) * lam + tu + tp, nx, ny, count, members, ids, rel)
+    L = np.empty(MAXNB, np.int64); nL = 0
+    for k in range(m):
+        r = math.sqrt(rel[k, 0] ** 2 + rel[k, 1] ** 2)
+        if lam - tl <= r < lam + tu:
+            L[nL] = k; nL += 1
+    nh = 0
+    big = math.radians(150.0); small = math.radians(60.0)
+    for p in range(nL):
+        for q in range(p + 1, nL):
+            for t in range(q + 1, nL):
+                k3 = np.array([L[p], L[q], L[t]])
+                th = np.array([math.atan2(rel[k3[0], 1], rel[k3[0], 0]),
+                               math.atan2(rel[k3[1], 1], rel[k3[1], 0]),
+                               math.atan2(rel[k3[2], 1], rel[k3[2], 0])])
+                order = np.argsort(th)
+                k3 = k3[order]; th = th[order]
+                g = np.array([_angdiff(th[0], th[1]), _angdiff(th[1], th[2]), _angdiff(th[2], th[0])])
+                # need one ~60 deg gap and two ~150 deg gaps
+                js = -1
+                for z in range(3):
+                    if abs(g[z] - small) < tang and abs(g[(z + 1) % 3] - big) < tang and abs(g[(z + 2) % 3] - big) < tang:
+                        js = z
+                if js < 0:
+                    continue
+                # gap js runs from k3[js] (= H2) to k3[js+1] (= H4); remaining one is H0
+                r2v = rel[k3[js]]; r4v = rel[k3[(js + 1) % 3]]; r0v = rel[k3[(js + 2) % 3]]
+                pred = np.empty((3, 2))
+                pred[0] = r0v + r2v; pred[1] = r0v + r4v; pred[2] = r2v + r4v
+                found = np.full(3, -1, np.int64)
+                ok = True
+                for z in range(3):
+                    cnt = 0
+                    for k in range(m):
+                        dx = rel[k, 0] - pred[z, 0]; dy = rel[k, 1] - pred[z, 1]
+                        if dx * dx + dy * dy < tp * tp:
+                            found[z] = k; cnt += 1
+                    if cnt != 1:
+                        ok = False; break
+                if not ok:
+                    continue
+                bset = np.array([ids[k3[0]], ids[k3[1]], ids[k3[2]], ids[found[0]], ids[found[1]], ids[found[2]]])
+                bset.sort()
+                dup = False
+                for z in range(1, 6):
+                    if bset[z] == bset[z - 1]:
+                        dup = True
+                if dup or nh >= MAXHEX:
+                    continue
+                Cx = (rel[k3[0], 0] + rel[k3[1], 0] + rel[k3[2], 0] + rel[found[0], 0] + rel[found[1], 0] + rel[found[2], 0]) / 3.0
+                Cy = (rel[k3[0], 1] + rel[k3[1], 1] + rel[k3[2], 1] + rel[found[0], 1] + rel[found[1], 1] + rel[found[2], 1]) / 3.0
+                hex_ids[nh, :] = bset
+                hex_C[nh, 0] = Cx; hex_C[nh, 1] = Cy   # = 2 * centre, i.e. the displacement of i
+                nh += 1
+    return nh
+
+
+@njit(cache=True)
+def flip_moves(s, img, box, lam, beta, n_attempt, n_pairs, seed_state, tl, tu, tp, tang):
+    """n_attempt hexagon-flip attempts. Returns (n_pairs, n_candidates_seen, n_proposed, n_accepted)."""
+    np.random.seed(seed_state)
+    a, b, c = box[0], box[1], box[2]
+    N = s.shape[0]
+    nx, ny, count, members, cell_of, slot_of = build_cells(s, a, b, c, lam)
+    if nx < 5 or ny < 5:
+        return n_pairs, 0, 0, 0
+    hid = np.empty((MAXHEX, 6), np.int64); hC = np.empty((MAXHEX, 2))
+    hid2 = np.empty((MAXHEX, 6), np.int64); hC2 = np.empty((MAXHEX, 2))
+    seen = 0; prop = 0; acc = 0
+    for t in range(n_attempt):
+        i = np.random.randint(N)
+        n_old = find_hexagons(i, s[i, 0], s[i, 1], s, a, b, c, lam, nx, ny, count, members, tl, tu, tp, tang, hid, hC)
+        if n_old == 0:
+            continue
+        seen += 1
+        k = np.random.randint(n_old)
+        dx = hC[k, 0]; dy = hC[k, 1]
+        dsy = dy / c; dsx = (dx - b * dsy) / a
+        rx = s[i, 0] + dsx; ry = s[i, 1] + dsy
+        fx = math.floor(rx); fy = math.floor(ry)
+        nsx = rx - fx; nsy = ry - fy
+        nnew = local_count(i, nsx, nsy, s, a, b, c, lam, nx, ny, count, members)
+        if nnew < 0:
+            continue
+        prop += 1
+        n_new = find_hexagons(i, nsx, nsy, s, a, b, c, lam, nx, ny, count, members, tl, tu, tp, tang, hid2, hC2)
+        rev = False
+        for z in range(n_new):
+            same = True
+            for q in range(6):
+                if hid2[z, q] != hid[k, q]:
+                    same = False
+            if same:
+                rev = True
+        if not rev:
+            continue
+        nold = local_count(i, s[i, 0], s[i, 1], s, a, b, c, lam, nx, ny, count, members)
+        dU = nnew - nold
+        arg = math.log(n_old / n_new) - beta * dU
+        if arg >= 0 or np.random.random() < math.exp(arg):
+            s[i, 0] = nsx; s[i, 1] = nsy
+            img[i, 0] += int(fx); img[i, 1] += int(fy)
+            newc = (int(nsx * nx) % nx) + nx * (int(nsy * ny) % ny)
+            _move_cell(i, newc, count, members, cell_of, slot_of)
+            n_pairs += dU
+            acc += 1
+    return n_pairs, seen, prop, acc
+
+
+def hexagon_state(lam, scale=1.002, box_side=40.0, noise=0.0, seed=0):
+    """Isolated flippable 30-degree hexagon (7 particles) in a large periodic box, for tests."""
+    L = lam * scale
+    u = np.array([L, 0.0]); v = L * np.array([math.cos(math.radians(30)), math.sin(math.radians(30))])
+    w = L * np.array([math.cos(math.radians(60)), math.sin(math.radians(60))])
+    O = np.array([box_side / 2 - 2.0, box_side / 2 - 1.5])
+    pts = np.array([O, O + u, O + u + v, O + u + v + w, O + v + w, O + w, O + v])  # last = interior
+    if noise > 0:
+        pts = pts + np.random.default_rng(seed).normal(0, noise, pts.shape)
+    box = np.array([box_side, 0.0, box_side])
+    s = (pts / box_side) % 1.0
+    return s, box

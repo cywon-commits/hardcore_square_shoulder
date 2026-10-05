@@ -1,6 +1,8 @@
 __pycache__/
 .pytest_cache/
 runs/
+runs2/
 logs/
+logs2/
 matrix.out
 nohup.out
