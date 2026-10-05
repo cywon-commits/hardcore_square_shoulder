@@ -226,6 +226,33 @@ def analyze(pos, box=None, lam=2 * math.cos(math.radians(15)), tol_in=0.06, tol_
     }
     return out
 
+# ------------------------------------------------------------------ temperature-adapted tolerance
+def tol_out_auto(T, P, lam):
+    """Upper shoulder window lam + tol_out.  Thermal gap <delta> ~ T/(P lam) (hard-contact NPT);
+    pilot-2 re-analysis (shoulder peak ~ lam + 0.02, width ~0.2 at T = 0.15) suggests 0.10 + 2 <delta>."""
+    return 0.10 + 2.0 * T / (P * lam)
+
+
+def tile_profile(pos, box, lam, tol_in=0.06, tol_out=0.15, nbins=40):
+    """Counts of A, B, C, D, X triangles per bin of the fractional x coordinate (slab geometry, periodic)."""
+    pos = _wrap(np.asarray(pos, float), box)
+    P, oid, img = _periodic_points(pos, box)
+    simp = Delaunay(P).simplices
+    o = oid[simp]; first = simp[np.arange(len(simp)), np.argmin(o, axis=1)]
+    simp = simp[img[first] == 0]
+    inv = np.linalg.inv(box)
+    out = np.zeros((nbins, 5), int)
+    for sp in simp:
+        cls = []
+        for a, b in ((0, 1), (1, 2), (2, 0)):
+            r = np.linalg.norm(P[sp[b]] - P[sp[a]])
+            cls.append("S" if r < lam - tol_in else ("L" if r < lam + tol_out else "X"))
+        t = {"LLL": 0, "LLS": 1, "LSS": 2, "SSS": 3}.get("".join(sorted(cls)), 4)
+        fx = (inv @ P[sp].mean(0))[0] % 1.0
+        out[min(int(fx * nbins), nbins - 1), t] += 1
+    return out
+
+
 # ------------------------------------------------------------------ prediction table for comparison
 def predictions_2cos15():
     r3 = math.sqrt(3)

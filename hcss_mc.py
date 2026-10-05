@@ -510,3 +510,133 @@ def hexagon_state(lam, scale=1.002, box_side=40.0, noise=0.0, seed=0):
     box = np.array([box_side, 0.0, box_side])
     s = (pts / box_side) % 1.0
     return s, box
+
+
+# ============================================================================ pilot 3 additions
+# ---------------------------------------------------------------------------- Frenkel-Ladd (Einstein molecule)
+@njit(cache=True)
+def sweep_fl(s, s0, box, lam, beta, Lam, dmax, n_pairs, seed_state):
+    """NVT sweep with harmonic tethers beta*U_spring = Lam * sum_{i>=1} |r_i - r0_i|^2.
+    Particle 0 is held fixed (Einstein-molecule reference, Vega & Noya 2007).
+    Returns (n_pairs, accepted, sum_{i>=1} |r_i - r0_i|^2 after the sweep)."""
+    np.random.seed(seed_state)
+    a, b, c = box[0], box[1], box[2]
+    N = s.shape[0]
+    nx, ny, count, members, cell_of, slot_of = build_cells(s, a, b, c, lam)
+    acc = 0
+    for t in range(N - 1):
+        i = 1 + np.random.randint(N - 1)
+        dx = dmax * (2.0 * np.random.random() - 1.0)
+        dy = dmax * (2.0 * np.random.random() - 1.0)
+        dsy = dy / c; dsx = (dx - b * dsy) / a
+        nsx = s[i, 0] + dsx; nsy = s[i, 1] + dsy
+        nsx -= math.floor(nsx); nsy -= math.floor(nsy)
+        nnew = local_count(i, nsx, nsy, s, a, b, c, lam, nx, ny, count, members)
+        if nnew < 0:
+            continue
+        nold = local_count(i, s[i, 0], s[i, 1], s, a, b, c, lam, nx, ny, count, members)
+        d_old = min_image_dist2(s[i, 0] - s0[i, 0], s[i, 1] - s0[i, 1], a, b, c)
+        d_new = min_image_dist2(nsx - s0[i, 0], nsy - s0[i, 1], a, b, c)
+        arg = -beta * (nnew - nold) - Lam * (d_new - d_old)
+        if arg >= 0 or np.random.random() < math.exp(arg):
+            s[i, 0] = nsx; s[i, 1] = nsy
+            newc = (int(nsx * nx) % nx) + nx * (int(nsy * ny) % ny)
+            _move_cell(i, newc, count, members, cell_of, slot_of)
+            n_pairs += nnew - nold
+            acc += 1
+    tot = 0.0
+    for i in range(1, N):
+        tot += min_image_dist2(s[i, 0] - s0[i, 0], s[i, 1] - s0[i, 1], a, b, c)
+    return n_pairs, acc, tot
+
+
+def einstein_dA1(s0, box, lam, beta, Lam, nsamp=2000, seed=0):
+    """beta*dA1 = -ln < exp(-beta U_pair) >_EinsteinMolecule(Lam)  (overlaps -> weight 0).
+    Returns (beta_dA1, fraction_overlap_free, mean_pairs)."""
+    rng = np.random.default_rng(seed)
+    a, b, c = box
+    sig = 1.0 / math.sqrt(2.0 * Lam)
+    vals = []
+    nfree = 0
+    for _ in range(nsamp):
+        d = rng.normal(0.0, sig, s0.shape); d[0] = 0.0
+        dsy = d[:, 1] / c; dsx = (d[:, 0] - b * dsy) / a
+        s = np.stack([(s0[:, 0] + dsx) % 1.0, (s0[:, 1] + dsy) % 1.0], axis=1)
+        n = total_count(s, a, b, c, lam)
+        if n >= 0:
+            vals.append(n); nfree += 1
+    if not vals:
+        return float("inf"), 0.0, float("nan")
+    v = np.array(vals, float); m = v.min()
+    lnmean = -beta * m + math.log(np.exp(-beta * (v - m)).sum() / nsamp)
+    return -lnmean, nfree / nsamp, float(v.mean())
+
+
+# ---------------------------------------------------------------------------- slab (interface) states
+def _rot_to_y(vec):
+    th = math.atan2(vec[1], vec[0])
+    phi = math.pi / 2 - th
+    return np.array([[math.cos(phi), -math.sin(phi)], [math.sin(phi), math.cos(phi)]])
+
+
+def _phase_points(kind, L, ny, nrep, seed):
+    """Points of a slab that is periodic along y with period ny*L. Returns (pts, thickness)."""
+    d = math.radians
+    rng = np.random.default_rng(seed)
+    if kind in ("A", "B"):
+        ang = 60.0 if kind == "A" else 30.0
+        a1 = np.array([0.0, L]); a2 = L * np.array([math.sin(d(ang)), math.cos(d(ang))])
+        pts = np.array([i * a1 + j * a2 for j in range(nrep) for i in range(ny)])
+        thick = nrep * a2[0]
+    elif kind == "hexlat":
+        u = L * np.array([1.0, 0.0]); v = L * np.array([math.cos(d(30)), math.sin(d(30))])
+        w = L * np.array([math.cos(d(60)), math.sin(d(60))])
+        T1 = u + v; T2 = v + w
+        R = _rot_to_y(T1 - T2)
+        u, v, w, T1, T2 = (R @ x for x in (u, v, w, T1, T2))
+        if T2[0] < 0:   # mirror so the slab grows towards +x
+            M = np.diag([-1.0, 1.0]); u, v, w, T1, T2 = (M @ x for x in (u, v, w, T1, T2))
+        P = []
+        for k in range(nrep):
+            for i in range(ny):
+                O = k * T2 + i * (T1 - T2)
+                P += [O, O + u, O + (v if rng.random() < 0.5 else u + w)]
+        pts = np.array(P)
+        thick = nrep * T2[0]
+    else:
+        raise ValueError(kind)
+    Ly = ny * L
+    pts[:, 1] %= Ly
+    pts[:, 0] -= pts[:, 0].min()
+    return pts, thick
+
+
+def slab_state(left, right, lam, ny, nL, nR, scale, seed=0, dmin=1.02):
+    """Two slabs (left | right) side by side, periodic in x and y, two interfaces.
+    The common y-period is ny*L (L = lam*scale): A and B use the lattice vector of length L, the hexagon
+    lattice uses T1 - T2 = u - w (also length L), so the slabs match without strain."""
+    L = lam * scale
+    pL, tL = _phase_points(left, L, ny, nL, seed)
+    pR, tR = _phase_points(right, L, ny, nR, seed + 1)
+    Ly = ny * L
+    wL = pL[:, 0].max(); wR = pR[:, 0].max()
+
+    def mind(P, Q, Lx):
+        best = 1e9
+        for sx in (-Lx, 0.0, Lx):
+            for sy in (-Ly, 0.0, Ly):
+                d = P[:, None, :] - (Q[None, :, :] + np.array([sx, sy]))
+                best = min(best, np.sqrt((d ** 2).sum(-1)).min())
+        return best
+    g = 0.3
+    while True:
+        Lx = wL + wR + 2 * g + 1e-9
+        Q = pR + np.array([wL + g, 0.0])
+        if mind(pL, Q, Lx) >= dmin:
+            break
+        g += 0.02
+    pts = np.vstack([pL, pR + np.array([wL + g, 0.0])])
+    labels = np.array([0] * len(pL) + [1] * len(pR))
+    box = np.array([Lx, 0.0, Ly])
+    s = np.stack([(pts[:, 0] / Lx) % 1.0, (pts[:, 1] / Ly) % 1.0], axis=1)
+    return s, box, labels

@@ -7,3 +7,7 @@ logs2/
 matrix.out
 nohup.out
 tscan.out
+coex/
+fe/
+logs3/
+summary3.txt
