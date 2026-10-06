@@ -65,3 +65,13 @@ def test_slab_B_dodeca():
     xA = prof[:, 0] / np.maximum(prof.sum(1), 1)
     assert np.all(xA[1:6] < 0.05)                 # B slab
     assert 0.25 < xA[12:17].mean() < 0.5          # 3.12.12 slab (14/38 = 0.37)
+
+
+def test_off_lambda_star_states():
+    for lam in (1.91, 1.96):
+        s, box = mc.lattice_state("B", lam, 400)
+        n = mc.total_count(s, *box, lam)
+        assert n == len(s)                        # every particle has exactly two core contacts in the B crystal
+        s, box = mc.lattice_state("dodeca", lam, 400, seed=1)
+        n = mc.total_count(s, *box, lam)
+        assert n >= 0 and n * 19 == 12 * len(s)   # tiling stretched to lam* below lam*, contacts released above

@@ -782,3 +782,31 @@ def match_periods(left, right, lam, scale, target=50.0, nmax=40):
         if best is None or score < best[0]:
             best = (score, nL, nR, mis)
     return best[1], best[2], best[3]
+
+
+# ============================================================================ pilot 4: lambda != lambda*
+LAM_STAR = 2 * math.cos(math.radians(15))
+_lattice_state_3b = lattice_state
+
+
+def lattice_state(kind, lam, N_target, scale=1.003, seed=0):
+    """Pilot-4 dispatcher.
+    B      : contact B crystal for any lam (rhombus lattice with apex alpha_B = 2 asin(1/(2 lam)), sides lam, short
+             diagonal 1); equals the 30-degree lattice at lam*.
+    dodeca, hexlat : 30-degree tilings with edge max(lam, lam*) (below lam* the rhombus short diagonal would be < 1,
+             so the tiling can only exist stretched to lam*; above lam* its core pairs are no longer in contact)."""
+    if kind == "B":
+        L = lam * scale
+        al = 2 * math.asin(1 / (2 * lam))
+        a1 = np.array([L, 0.0]); a2 = np.array([L * math.cos(al), L * math.sin(al)])
+        ny = int(round(math.sqrt(N_target * 0.5))); ny += ny % 2
+        nx = int(round(N_target / ny))
+        pts = np.array([i * a1 + j * a2 for j in range(ny) for i in range(nx)])
+        A = nx * a1; B2 = ny * a2
+        b = B2[0] - round(B2[0] / A[0]) * A[0]
+        box = np.array([A[0], b, B2[1]])
+        sy = pts[:, 1] / box[2]; sx = (pts[:, 0] - box[1] * sy) / box[0]
+        return np.stack([sx % 1.0, sy % 1.0], axis=1), box
+    if kind in ("dodeca", "hexlat"):
+        return _lattice_state_3b(kind, max(lam, LAM_STAR), N_target, scale=scale, seed=seed)
+    return _lattice_state_3b(kind, lam, N_target, scale=scale, seed=seed)
