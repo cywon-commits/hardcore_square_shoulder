@@ -73,6 +73,9 @@ def main():
         if k >= a.npt_sweeps // 2:
             boxes.append(box.copy()); es.append(n / N); vs.append(box[0] * box[2] / N)
     boxm = np.mean(boxes, 0); e_m = float(np.mean(es)); v_m = float(np.mean(vs))
+    from hcss_analysis import analyze, tol_out_auto
+    _r = analyze(mc.cart(s, box), mc.box_matrix(box), lam=a.lam, tol_out=tol_out_auto(a.T, a.P, a.lam), sk_nmax=0)
+    npt_structure = dict(composition=_r["composition"], core_coordination=_r["mean_core_coordination"])
     h = e_m + a.P * v_m
     npt = dict(box=boxm.tolist(), e=e_m, e_err=block_err(es), v=v_m, v_err=block_err(vs), h=h,
                h_err=math.hypot(block_err(es), a.P * block_err(vs)))
@@ -111,7 +114,7 @@ def main():
     I_err = math.sqrt(sum((ws[j] * lams[j] * msd_err[j]) ** 2 for j in range(K)) + (a.lam_min * msd_err[K]) ** 2)
     bA = -math.log(V) - (N - 1) * math.log(math.pi / a.lam_max) + dA1 - I
     bg = bA / N + beta * a.P * v_m
-    out = dict(kind=a.kind, seed=a.seed, lam=a.lam, T=a.T, P=a.P, N=N, npt=npt,
+    out = dict(kind=a.kind, seed=a.seed, lam=a.lam, T=a.T, P=a.P, N=N, npt=npt, npt_structure=npt_structure,
                beta_A_per_N=bA / N, beta_g=bg, beta_g_err=math.hypot(I_err / N, beta * a.P * npt["v_err"]),
                components=dict(minus_lnV_over_N=-math.log(V) / N,
                                einstein_term_over_N=-(N - 1) * math.log(math.pi / a.lam_max) / N,

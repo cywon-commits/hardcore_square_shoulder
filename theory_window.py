@@ -24,8 +24,12 @@ E_T = 12 / 19
 
 def vA(l): return math.sqrt(3) / 2 * l * l
 def vB(l): return math.sqrt(l * l - 0.25)
+KAPPA = 0.0      # effective-volume slope for lam < lam* (pilot 4: ~1.7 at T = 0.06); set with --kappa
+
+
 def vt(l):
-    L = max(l, LS); return L * L * (14 * math.sqrt(3) + 24) / 76
+    L = max(l, LS); v = L * L * (14 * math.sqrt(3) + 24) / 76
+    return v - KAPPA * max(0.0, LS - l)
 
 
 def sigmas_from(lam0, P0, T0, dg_tB, dg_AB):
@@ -58,7 +62,10 @@ def main():
     ap.add_argument("--P0", type=float, default=0.735); ap.add_argument("--T0", type=float, default=0.06)
     ap.add_argument("--sigmaB", type=float, default=None); ap.add_argument("--sigmaA", type=float, default=None)
     ap.add_argument("--out", default="theory_window")
+    ap.add_argument("--kappa", type=float, default=0.0, help="effective-volume slope for lam < lam*")
     a = ap.parse_args()
+    global KAPPA
+    KAPPA = a.kappa
     G = load_group(glob.glob(os.path.join(a.ref_dir, "*.json")))
     if a.sigmaB is None:
         ref = G[(round(a.lam0, 4), round(a.P0, 4), round(a.T0, 4))]
@@ -67,7 +74,7 @@ def main():
         sB, sA = sigmas_from(a.lam0, a.P0, a.T0, tB, AB)
     else:
         sB, sA = a.sigmaB, a.sigmaA
-    print(f"sigma_B = {sB:.4f}, sigma_A = {sA:.4f}  (reference lam={a.lam0}, P={a.P0}, T={a.T0})")
+    print(f"sigma_B = {sB:.4f}, sigma_A = {sA:.4f}  (reference lam={a.lam0}, P={a.P0}, T={a.T0}), kappa = {KAPPA}")
     rows = []
     print(f"{'lam':>6s} {'P':>7s} {'T':>5s} | {'pred t-B':>9s} {'meas t-B':>15s} | {'pred t-A':>9s} {'meas t-A':>15s} | stable(pred/meas)")
     for (l, P, T), d in sorted(G.items()):
