@@ -9,7 +9,8 @@ Steps
      (thermal wavelength = 1; the 1/N! cancels against the N! site permutations).
      The integral is done in x = ln Lam with Gauss-Legendre nodes on [ln Lam_min, ln Lam_max]
      plus Lam_min * <...>_{Lam_min} for the piece below Lam_min.
-  4. beta*g = beta*A/N + beta*P*<v>.  For --kind hexlat the configurational entropy of the hexagon-flip
+  4. beta*g = beta*A/N + beta*P*<v>.  For --kind dodeca the bound is ln(4421)/19 (3.12.12 tiling with independently
+     filled 12-gons).  For --kind hexlat the configurational entropy of the hexagon-flip
      ensemble, ln(2)/3 per particle (exact lower bound for the random tiling), is reported separately:
      beta*g_tiling = beta*g_hexlat - ln(2)/3.
 
@@ -32,7 +33,7 @@ def block_err(x, nb=10):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--kind", required=True, choices=["A", "B", "hexlat", "rows"])
+    ap.add_argument("--kind", required=True, choices=["A", "B", "hexlat", "rows", "dodeca"])
     ap.add_argument("--lam", type=float, default=1.93)
     ap.add_argument("--T", type=float, default=0.06)
     ap.add_argument("--P", type=float, default=0.735)
@@ -121,6 +122,10 @@ def main():
     if a.kind == "hexlat":
         out["s_conf_lower_bound"] = math.log(2) / 3
         out["beta_g_tiling"] = bg - math.log(2) / 3
+    if a.kind == "dodeca":
+        # independent fillings of each 12-gon of the 3.12.12 tiling: 4421 per 19 particles (exact lower bound)
+        out["s_conf_lower_bound"] = math.log(4421) / 19
+        out["beta_g_tiling"] = bg - math.log(4421) / 19
     json.dump(out, open(a.out, "w"), indent=2)
     print(json.dumps({k: out[k] for k in ("kind", "T", "N", "beta_g", "beta_g_err")} | {"h": h}, indent=1))
 

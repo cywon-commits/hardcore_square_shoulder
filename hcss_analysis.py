@@ -233,15 +233,17 @@ def tol_out_auto(T, P, lam):
     return 0.10 + 2.0 * T / (P * lam)
 
 
-def tile_profile(pos, box, lam, tol_in=0.06, tol_out=0.15, nbins=40):
-    """Counts of A, B, C, D, X triangles per bin of the fractional x coordinate (slab geometry, periodic)."""
+def tile_profile(pos, box, lam, tol_in=0.06, tol_out=0.15, nbins=40, smooth=0.0):
+    """Counts of A, B, C, D, X triangles per bin of the fractional x coordinate (slab geometry, periodic).
+    smooth > 0: each triangle is spread with a periodic Gaussian of width `smooth` (cartesian x units) instead of
+    hard binning; use smooth ~ one lattice period to remove the moire (aliasing) between lattice planes and bins."""
     pos = _wrap(np.asarray(pos, float), box)
     P, oid, img = _periodic_points(pos, box)
     simp = Delaunay(P).simplices
     o = oid[simp]; first = simp[np.arange(len(simp)), np.argmin(o, axis=1)]
     simp = simp[img[first] == 0]
     inv = np.linalg.inv(box)
-    out = np.zeros((nbins, 5), int)
+    out = np.zeros((nbins, 5), float)
     for sp in simp:
         cls = []
         for a, b in ((0, 1), (1, 2), (2, 0)):
@@ -249,7 +251,14 @@ def tile_profile(pos, box, lam, tol_in=0.06, tol_out=0.15, nbins=40):
             cls.append("S" if r < lam - tol_in else ("L" if r < lam + tol_out else "X"))
         t = {"LLL": 0, "LLS": 1, "LSS": 2, "SSS": 3}.get("".join(sorted(cls)), 4)
         fx = (inv @ P[sp].mean(0))[0] % 1.0
-        out[min(int(fx * nbins), nbins - 1), t] += 1
+        if smooth > 0:
+            Lx = box[0, 0]
+            xc = (np.arange(nbins) + 0.5) / nbins
+            d = (xc - fx + 0.5) % 1.0 - 0.5
+            wgt = np.exp(-0.5 * (d * Lx / smooth) ** 2); wgt /= wgt.sum()
+            out[:, t] = out[:, t] + wgt
+        else:
+            out[min(int(fx * nbins), nbins - 1), t] += 1
     return out
 
 

@@ -48,7 +48,7 @@ def main():
         rows = [json.load(open(f)) for f in a.fe]
         byT = {}
         for r in rows:
-            g = r.get("beta_g_tiling", r["beta_g"]); name = "tiling(hexlat-ln2/3)" if "beta_g_tiling" in r else r["kind"]
+            g = r.get("beta_g_tiling", r["beta_g"]); name = (f"tiling({r['kind']}-s_conf)" if "beta_g_tiling" in r else r["kind"]) + f"[N{r['N']}]"
             byT.setdefault(r["T"], []).append((name + f"[seed {r['seed']}]", g, r["beta_g_err"], r["npt"]["h"], r["kind"], r["beta_g"]))
         for T, lst in sorted(byT.items()):
             gmin = min(x[1] for x in lst)

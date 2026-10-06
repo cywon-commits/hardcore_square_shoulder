@@ -43,3 +43,25 @@ def test_slab_states():
         inner_crystal = xA[2:7]; inner_tiling = xA[12:16]
         assert np.allclose(inner_crystal, xa, atol=0.05)
         assert np.all((inner_tiling > 0.2) & (inner_tiling < 0.5))
+
+
+def test_dodeca_state():
+    from hcss_analysis import analyze
+    s, box = mc.lattice_state("dodeca", LAM, 600, seed=4)
+    N = len(s)
+    assert N % 19 == 0
+    n = mc.total_count(s, *box, LAM)
+    assert n * 19 == 12 * N                       # only the 12 rhombus core contacts per 12-gon cost eps
+    r = analyze(mc.cart(s, box), mc.box_matrix(box), lam=LAM, sk_nmax=0)
+    assert abs(r["composition"]["A"] - 14 / 38) < 1e-9 and abs(r["composition"]["B"] - 24 / 38) < 1e-9
+
+
+def test_slab_B_dodeca():
+    nyL, nyR, mis = mc.match_periods("B", "dodeca", LAM, 1.035, 50)
+    assert mis < 0.005
+    s, box, lab, mis2 = mc.slab_state2("B", "dodeca", LAM, nyL, nyR, 30, 3, 1.035, seed=1)
+    assert mc.total_count(s, *box, LAM) >= 0
+    prof = tile_profile(mc.cart(s, box), mc.box_matrix(box), LAM, tol_out=0.25, nbins=20)
+    xA = prof[:, 0] / np.maximum(prof.sum(1), 1)
+    assert np.all(xA[1:6] < 0.05)                 # B slab
+    assert 0.25 < xA[12:17].mean() < 0.5          # 3.12.12 slab (14/38 = 0.37)

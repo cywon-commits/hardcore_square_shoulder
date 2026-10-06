@@ -640,3 +640,145 @@ def slab_state(left, right, lam, ny, nL, nR, scale, seed=0, dmin=1.02):
     box = np.array([Lx, 0.0, Ly])
     s = np.stack([(pts[:, 0] / Lx) % 1.0, (pts[:, 1] / Ly) % 1.0], axis=1)
     return s, box, labels
+
+
+# ============================================================================ pilot 3b additions: 3.12.12 tiling
+import os as _os
+_FILL = None
+
+
+def dodecagon_fillings():
+    """(4421, 13, 2) interior vertices of all fillings of a unit-edge 12-gon (relative to its centre)."""
+    global _FILL
+    if _FILL is None:
+        p = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "dodecagon_fillings.npz")
+        _FILL = np.load(p)["interior"]
+    return _FILL
+
+
+def _dodecagon_vertices(L):
+    R = L / (2 * math.sin(math.radians(15)))
+    return np.array([[R * math.cos(math.radians(15 + 30 * k)), R * math.sin(math.radians(15 + 30 * k))] for k in range(12)])
+
+
+def dodeca_cell_points(L, centres, rng):
+    """All particles for 12-gons at the given centres: 12-gon vertices (to be de-duplicated by the caller)
+    and the 13 interior vertices of an independently chosen random filling (s_conf >= ln(4421)/19 per particle)."""
+    F = dodecagon_fillings()
+    V = _dodecagon_vertices(L)
+    out_v, out_i = [], []
+    for c in centres:
+        out_v.append(V + c)
+        out_i.append(F[rng.integers(len(F))] * L + c)
+    return np.vstack(out_v), np.vstack(out_i)
+
+
+def _dedupe_periodic(P, M, tol=1e-6):
+    inv = np.linalg.inv(M)
+    f = (P @ inv.T) % 1.0
+    f[np.abs(f - 1.0) < tol] = 0.0
+    key = np.round(f / 1e-7).astype(np.int64)
+    _, idx = np.unique(key, axis=0, return_index=True)
+    return P[np.sort(idx)]
+
+
+def dodeca_state(lam, N_target, scale=1.003, seed=0):
+    """Periodic 3.12.12 tiling (12-gons + triangles, all of edge L = lam*scale) with every 12-gon filled by an
+    independent random choice among its 4421 tilings.  19 particles and 14 A + 24 B tiles per 12-gon."""
+    L = lam * scale
+    D = L / math.tan(math.radians(15))            # centre-centre distance of edge-sharing 12-gons
+    a1 = np.array([D, 0.0]); a2 = np.array([D / 2, D * math.sqrt(3) / 2])
+    n = max(2, int(round(math.sqrt(N_target / 19.0))))
+    M = np.column_stack([n * a1, n * a2])
+    rng = np.random.default_rng(seed)
+    centres = [i * a1 + j * a2 for i in range(n) for j in range(n)]
+    Vb, Vi = dodeca_cell_points(L, centres, rng)
+    Vb = _dedupe_periodic(Vb, M)
+    pts = np.vstack([Vb, Vi])
+    A1 = M[:, 0]; A2 = M[:, 1]
+    b = A2[0] - round(A2[0] / A1[0]) * A1[0]
+    box = np.array([A1[0], b, A2[1]])
+    sy = pts[:, 1] / box[2]; sx = (pts[:, 0] - box[1] * sy) / box[0]
+    s = np.stack([sx % 1.0, sy % 1.0], axis=1)
+    return s, box
+
+
+_lattice_state_base = lattice_state
+
+
+def lattice_state(kind, lam, N_target, scale=1.003, seed=0):
+    if kind == "dodeca":
+        return dodeca_state(lam, N_target, scale=scale, seed=seed)
+    return _lattice_state_base(kind, lam, N_target, scale=scale, seed=seed)
+
+
+def _phase_points_general(kind, L, ny, nrep, seed):
+    """Slab points periodic in y. Returns (pts, natural y-period)."""
+    if kind in ("A", "B", "hexlat"):
+        pts, _ = _phase_points(kind, L, ny, nrep, seed)
+        return pts, ny * L
+    if kind == "dodeca":
+        D = L / math.tan(math.radians(15))
+        a1 = np.array([0.0, D]); a2 = np.array([D * math.sqrt(3) / 2, D / 2])   # a1 along y
+        rng = np.random.default_rng(seed)
+        centres = [i * a1 + j * a2 for j in range(nrep) for i in range(ny)]
+        R = np.array([[0.0, -1.0], [1.0, 0.0]])          # rotate 12-gon/fillings by 90 deg to match the frame
+        F = dodecagon_fillings(); V = _dodecagon_vertices(L)
+        Pv, Pi = [], []
+        for c in centres:
+            Pv.append(V @ R.T + c); Pi.append((F[rng.integers(len(F))] * L) @ R.T + c)
+        Ly = ny * D
+        Pv = np.vstack(Pv); Pv[:, 1] %= Ly
+        key = np.round(np.stack([Pv[:, 0], Pv[:, 1] % Ly], 1) / 1e-6).astype(np.int64)
+        key[:, 1] %= int(round(Ly / 1e-6))
+        _, idx = np.unique(key, axis=0, return_index=True)
+        pts = np.vstack([Pv[np.sort(idx)], np.vstack(Pi)])
+        pts[:, 1] %= Ly
+        pts[:, 0] -= pts[:, 0].min()
+        return pts, Ly
+    raise ValueError(kind)
+
+
+def slab_state2(left, right, lam, nyL, nyR, nL, nR, scale, seed=0, dmin=1.02):
+    """Like slab_state, but each slab has its own natural y-period; the shorter one is stretched to the longer
+    (choose nyL, nyR so the mismatch is < ~0.5 %; stretching only opens gaps, it never creates overlaps)."""
+    L = lam * scale
+    pL, LyL = _phase_points_general(left, L, nyL, nL, seed)
+    pR, LyR = _phase_points_general(right, L, nyR, nR, seed + 1)
+    Ly = max(LyL, LyR)
+    pL[:, 1] *= Ly / LyL; pR[:, 1] *= Ly / LyR
+    wL = pL[:, 0].max(); wR = pR[:, 0].max()
+
+    def mind(P, Q, Lx):
+        best = 1e9
+        for sx in (-Lx, 0.0, Lx):
+            for sy in (-Ly, 0.0, Ly):
+                d = P[:, None, :] - (Q[None, :, :] + np.array([sx, sy]))
+                best = min(best, np.sqrt((d ** 2).sum(-1)).min())
+        return best
+    g = 0.3
+    while True:
+        Lx = wL + wR + 2 * g + 1e-9
+        if mind(pL, pR + np.array([wL + g, 0.0]), Lx) >= dmin:
+            break
+        g += 0.02
+    pts = np.vstack([pL, pR + np.array([wL + g, 0.0])])
+    labels = np.array([0] * len(pL) + [1] * len(pR))
+    box = np.array([Lx, 0.0, Ly])
+    s = np.stack([(pts[:, 0] / Lx) % 1.0, (pts[:, 1] / Ly) % 1.0], axis=1)
+    return s, box, labels, abs(LyL - LyR) / Ly
+
+
+def match_periods(left, right, lam, scale, target=50.0, nmax=40):
+    """Integers (nyL, nyR) whose natural y-periods agree best, with Ly near `target`."""
+    L = lam * scale
+    per = {"A": L, "B": L, "hexlat": L, "dodeca": L / math.tan(math.radians(15))}
+    best = None
+    for nR in range(1, nmax):
+        LyR = nR * per[right]
+        nL = max(1, int(round(LyR / per[left])))
+        mis = abs(nL * per[left] - LyR) / LyR
+        score = mis + 0.002 * abs(LyR - target) / target
+        if best is None or score < best[0]:
+            best = (score, nL, nR, mis)
+    return best[1], best[2], best[3]
