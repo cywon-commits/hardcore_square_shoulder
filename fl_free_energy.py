@@ -39,7 +39,7 @@ def main():
     ap.add_argument("--P", type=float, default=0.735)
     ap.add_argument("--N", type=int, default=1000)
     ap.add_argument("--seed", type=int, default=1)
-    ap.add_argument("--npt-sweeps", type=int, default=30000)
+    ap.add_argument("--npt-sweeps", type=int, default=50000)
     ap.add_argument("--n-nodes", type=int, default=14)
     ap.add_argument("--lam-min", type=float, default=0.05)
     ap.add_argument("--lam-max", type=float, default=3.0e4)
@@ -50,6 +50,11 @@ def main():
                     help="Einstein sites: ideal lattice positions in the averaged box (pilots 3-5) or the NPT-averaged "
                          "positions (drift removed); 'mean' falls back to the sampled configuration closest to the mean "
                          "if the mean positions overlap")
+    ap.add_argument("--expand-c", type=float, default=None,
+                    help="NPT starts from v0 + c * 2T/P.  Default (pilot 7): c = 1 for crystals (as in pilots 3-6) and c = 0.8 "
+                         "for the tilings, so that the tiling approaches its equilibrium volume (~ v0 + 0.9 * 2T/P below lam*) "
+                         "from below, i.e. in the fast expanding direction (compression from above is very slow, pilot 6). "
+                         "Below lam* use kind dodeca1_jam (v0 = jammed volume).")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
@@ -60,7 +65,8 @@ def main():
     # start from the thermally expanded lattice  v = v0 + 2T/P  (hard-contact NPT law, pilot-2 check)
     s_ideal, box1 = mc.lattice_state(a.kind, a.lam, a.N, scale=1.0, seed=a.seed)
     v0 = box1[0] * box1[2] / len(s_ideal)
-    f = math.sqrt(1.0 + (2 * a.T / a.P) / v0)
+    c_exp = a.expand_c if a.expand_c is not None else (0.8 if a.kind.startswith("dodeca") or a.kind == "hexlat" else 1.0)
+    f = math.sqrt(1.0 + c_exp * (2 * a.T / a.P) / v0)
     s_ideal, box = mc.lattice_state(a.kind, a.lam, a.N, scale=f, seed=a.seed)
     s = s_ideal.copy(); img = np.zeros((len(s), 2), np.int64); N = len(s)
     n = mc.total_count(s, *box, a.lam)
@@ -83,11 +89,13 @@ def main():
                 if k % 200 == 0:
                     u_snaps.append(u.copy())
     boxm = np.mean(boxes, 0); e_m = float(np.mean(es)); v_m = float(np.mean(vs))
+    hq = len(vs) // 2
+    npt_drift = float(np.mean(vs[hq:]) - np.mean(vs[:hq]))
     from hcss_analysis import analyze, tol_out_auto
     _r = analyze(mc.cart(s, box), mc.box_matrix(box), lam=a.lam, tol_out=tol_out_auto(a.T, a.P, a.lam), sk_nmax=0)
     npt_structure = dict(composition=_r["composition"], core_coordination=_r["mean_core_coordination"])
     h = e_m + a.P * v_m
-    npt = dict(box=boxm.tolist(), e=e_m, e_err=block_err(es), v=v_m, v_err=block_err(vs), h=h,
+    npt = dict(drift_v_last_minus_first_half_of_sampling=npt_drift, start_scale=f, box=boxm.tolist(), e=e_m, e_err=block_err(es), v=v_m, v_err=block_err(vs), h=h,
                h_err=math.hypot(block_err(es), a.P * block_err(vs)))
 
     # ---- 2.-3. Frenkel-Ladd in the averaged box, sites = ideal fractional positions

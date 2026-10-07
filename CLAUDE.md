@@ -1,4 +1,4 @@
-# CLAUDE.md — HCSS pilot 6 (jammed basin, kinetic trapping, lower end of the tiling band)
+# CLAUDE.md — HCSS pilot 7 (final numbers with corrected NPT start; lower end of the tiling band)
 
 ## Context
 2D hard-core square-shoulder model (sigma = 1, eps = 1, k_B = 1): r < 1 forbidden, 1 <= r < lam costs eps, r >= lam free.
@@ -13,9 +13,13 @@ lam = 1.93, P = 0.735 (T = 0.06, 0.08). Pilot 4 (README.md) tests the hard-conta
 
 ## Workflow
 1. `pip install -r requirements.txt`; `python -m pytest -q test_hcss_mc.py test_flip.py test_fl.py` must give 17 passed.
-2. `NPROC=<cores> bash run_package6.sh` (writes fe6/, npt6/, summary6.txt).
+2. `NPROC=<cores> bash run_package7.sh` (writes fe7/, summary7.txt, phase_window_final.{json,png}).
 3. If a Frenkel-Ladd run reports an overlap-free fraction < 0.8 or an infinite beta_g, rerun it with larger --lam-max and say so.
 
 ## Reporting
-- Report in Korean in `results6.md` following README sections 5-6, with tables (2-sigma errors) and figure paths.
+- Report in Korean in `results7.md` following README sections 5-6, with tables (2-sigma errors) and figure paths.
 - Do not edit the theory text or the prediction table in README.
+
+## Pilot-7 method notes
+- fl_free_energy.py starts NPT at v0 + c*2T/P with c = 1 for crystals and c = 0.8 for tilings (--expand-c overrides);
+  below lam* the tiling is kind dodeca1_jam. All runs use --sites mean. Do not revert to the pre-expanded tiling start.

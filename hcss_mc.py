@@ -822,9 +822,12 @@ def dodeca1_state(lam, N_target, scale=1.003, seed=0, jammed=False):
     F = dodecagon_fillings()
     fill = int(np.random.default_rng(seed).integers(len(F)))
     if jammed and lam < LAM_STAR:
-        r = JV.jam([fill], lam)
-        if not r["success"] or r["newS"] > 0:
-            raise RuntimeError("jam optimisation failed")
+        for k in range(12):                      # SLSQP occasionally diverges numerically: retry with the next filling
+            r = JV.jam([(fill + k) % len(F)], lam)
+            if r["success"] and r["newS"] == 0 and np.isfinite(r["v"]) and r["v"] > 0:
+                break
+        else:
+            raise RuntimeError("jam optimisation failed for 12 fillings")
         P = r["P"]; a, b, c = r["cell"]
     else:
         P, M = JV.cell([fill], max(lam, LAM_STAR), 1)

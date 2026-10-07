@@ -48,11 +48,18 @@ def window(l, T, sB, sA):
 
 
 def load_group(files):
+    """group Frenkel-Ladd JSONs by (lam, P, T). The tiling entry 'dodeca' is the random-filling 3.12.12 if present,
+    otherwise the jammed single-filling tiling (dodeca1_jam), otherwise dodeca1."""
     G = {}
     for f in files:
         r = json.load(open(f))
         key = (round(r["lam"], 4), round(r["P"], 4), round(r["T"], 4))
         G.setdefault(key, {})[r["kind"]] = r
+    for d in G.values():
+        if "dodeca" not in d:
+            for alt in ("dodeca1_jam", "dodeca1"):
+                if alt in d:
+                    d["dodeca"] = d[alt]; break
     return G
 
 
