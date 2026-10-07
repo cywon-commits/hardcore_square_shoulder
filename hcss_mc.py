@@ -810,3 +810,40 @@ def lattice_state(kind, lam, N_target, scale=1.003, seed=0):
     if kind in ("dodeca", "hexlat"):
         return _lattice_state_3b(kind, max(lam, LAM_STAR), N_target, scale=scale, seed=seed)
     return _lattice_state_3b(kind, lam, N_target, scale=scale, seed=seed)
+
+
+# ============================================================================ pilot 6: single-filling 3.12.12 (ideal / jammed)
+def dodeca1_state(lam, N_target, scale=1.003, seed=0, jammed=False):
+    """3.12.12 tiling with ONE filling (index chosen by seed) in every 12-gon, replicated n x n.
+    jammed=False: ideal geometry with edge max(lam, lam*);  jammed=True and lam < lam*: the T = 0 jammed
+    (isostatic) geometry of the fixed contact network (core pairs >= 1, all other pairs >= lam), from jam_volume.jam.
+    Lengths are finally multiplied by `scale`."""
+    import jam_volume as JV
+    F = dodecagon_fillings()
+    fill = int(np.random.default_rng(seed).integers(len(F)))
+    if jammed and lam < LAM_STAR:
+        r = JV.jam([fill], lam)
+        if not r["success"] or r["newS"] > 0:
+            raise RuntimeError("jam optimisation failed")
+        P = r["P"]; a, b, c = r["cell"]
+    else:
+        P, M = JV.cell([fill], max(lam, LAM_STAR), 1)
+        P = P - P[0]; a, b, c = M[0, 0], M[0, 1], M[1, 1]
+    n = max(2, int(round(math.sqrt(N_target / 19.0))))
+    A1 = np.array([a, 0.0]); A2 = np.array([b, c])
+    pts = np.vstack([P + i * A1 + j * A2 for i in range(n) for j in range(n)]) * scale
+    box = np.array([n * a, n * b, n * c]) * scale
+    box[1] = box[1] - round(box[1] / box[0]) * box[0]
+    sy = pts[:, 1] / box[2]; sx = (pts[:, 0] - box[1] * sy) / box[0]
+    return np.stack([sx % 1.0, sy % 1.0], axis=1), box
+
+
+_lattice_state_p5 = lattice_state
+
+
+def lattice_state(kind, lam, N_target, scale=1.003, seed=0):
+    if kind == "dodeca1":
+        return dodeca1_state(lam, N_target, scale=scale, seed=seed, jammed=False)
+    if kind == "dodeca1_jam":
+        return dodeca1_state(lam, N_target, scale=scale, seed=seed, jammed=True)
+    return _lattice_state_p5(kind, lam, N_target, scale=scale, seed=seed)

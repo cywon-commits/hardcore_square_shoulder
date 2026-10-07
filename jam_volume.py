@@ -79,7 +79,7 @@ def jam(fill_idx, lam, nc=1, rcut_extra=0.6, verbose=False):
     act = cons(res.x)
     nact = int((np.abs(act) < 1e-6).sum())
     return dict(v=res.x[-3]*res.x[-1]/N, v_ideal=a0*b0*0 + a0*c0/N, success=res.success, newS=newS,
-                n_active=nact, n_cons=len(I), N=N)
+                n_active=nact, n_cons=len(I), N=N, P=P, cell=(float(res.x[-3]), float(res.x[-2]), float(res.x[-1])))
 
 if __name__ == "__main__":
     rng = np.random.default_rng(0)

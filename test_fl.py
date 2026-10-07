@@ -75,3 +75,15 @@ def test_off_lambda_star_states():
         s, box = mc.lattice_state("dodeca", lam, 400, seed=1)
         n = mc.total_count(s, *box, lam)
         assert n >= 0 and n * 19 == 12 * len(s)   # tiling stretched to lam* below lam*, contacts released above
+
+
+def test_dodeca1_states():
+    lam = 1.85
+    s, box = mc.lattice_state("dodeca1_jam", lam, 400, scale=1.0005, seed=3)
+    n = mc.total_count(s, *box, lam)
+    assert n >= 0 and n * 19 == 12 * len(s)          # jammed network keeps exactly the 12 core contacts per 12-gon
+    v_jam = box[0] * box[2] / len(s)
+    s2, box2 = mc.lattice_state("dodeca1", lam, 400, scale=1.0005, seed=3)
+    v_ideal = box2[0] * box2[2] / len(s2)
+    LS = mc.LAM_STAR
+    assert 1.3 < (v_ideal - v_jam) / (LS - lam) / 1.0005 ** 2 < 1.6   # kappa_jam ~ 1.48

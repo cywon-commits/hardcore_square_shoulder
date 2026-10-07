@@ -33,7 +33,7 @@ def block_err(x, nb=10):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--kind", required=True, choices=["A", "B", "hexlat", "rows", "dodeca"])
+    ap.add_argument("--kind", required=True, choices=["A", "B", "hexlat", "rows", "dodeca", "dodeca1", "dodeca1_jam"])
     ap.add_argument("--lam", type=float, default=1.93)
     ap.add_argument("--T", type=float, default=0.06)
     ap.add_argument("--P", type=float, default=0.735)
@@ -46,6 +46,10 @@ def main():
     ap.add_argument("--equil", type=int, default=2000)
     ap.add_argument("--sample", type=int, default=8000)
     ap.add_argument("--dA1-samples", type=int, default=2000)
+    ap.add_argument("--sites", default="ideal", choices=["ideal", "mean"],
+                    help="Einstein sites: ideal lattice positions in the averaged box (pilots 3-5) or the NPT-averaged "
+                         "positions (drift removed); 'mean' falls back to the sampled configuration closest to the mean "
+                         "if the mean positions overlap")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
@@ -62,6 +66,7 @@ def main():
     n = mc.total_count(s, *box, a.lam)
     dmax, dbox = 0.03, 0.002
     acc_p = acc_b = win = 0; boxes = []; es = []; vs = []
+    u_acc = np.zeros_like(s); u_cnt = 0; u_snaps = []
     tune = a.npt_sweeps // 5
     for k in range(a.npt_sweeps):
         n, ap_, ab_ = mc.sweep_img(s, img, box, a.lam, beta, a.P, dmax, dbox, 0.0, n, int(rs.integers(1, 2**31 - 1)))
@@ -72,6 +77,11 @@ def main():
             acc_p = acc_b = win = 0
         if k >= a.npt_sweeps // 2:
             boxes.append(box.copy()); es.append(n / N); vs.append(box[0] * box[2] / N)
+            if a.sites == "mean" and k % 10 == 0:
+                u = s + img; u = u - u.mean(0)
+                u_acc += u; u_cnt += 1
+                if k % 200 == 0:
+                    u_snaps.append(u.copy())
     boxm = np.mean(boxes, 0); e_m = float(np.mean(es)); v_m = float(np.mean(vs))
     from hcss_analysis import analyze, tol_out_auto
     _r = analyze(mc.cart(s, box), mc.box_matrix(box), lam=a.lam, tol_out=tol_out_auto(a.T, a.P, a.lam), sk_nmax=0)
@@ -82,6 +92,22 @@ def main():
 
     # ---- 2.-3. Frenkel-Ladd in the averaged box, sites = ideal fractional positions
     s0 = s_ideal.copy(); V = boxm[0] * boxm[2]
+    sites_info = dict(mode=a.sites)
+    if a.sites == "mean":
+        um = u_acc / u_cnt
+        cand = (um + 0.5) % 1.0
+        nc = mc.total_count(cand, *boxm, a.lam)
+        if nc >= 0:
+            s0 = cand; sites_info.update(used="mean", site_pairs_per_N=nc / N)
+        else:
+            d = [((((x - um) + 0.5) % 1.0 - 0.5) ** 2).sum() for x in u_snaps]
+            med = (u_snaps[int(np.argmin(d))] + 0.5) % 1.0
+            s0 = med; sites_info.update(used="medoid", site_pairs_per_N=mc.total_count(med, *boxm, a.lam) / N)
+        # rms distance between the chosen sites and the ideal lattice sites (in the averaged box)
+        dd = ((s0 - s_ideal + 0.5) % 1.0 - 0.5)
+        dd = dd - dd.mean(0)
+        dc = np.stack([boxm[0] * dd[:, 0] + boxm[1] * dd[:, 1], boxm[2] * dd[:, 1]], 1)
+        sites_info["rms_offset_from_ideal"] = float(np.sqrt((dc ** 2).sum(1).mean()))
     # adapt Lam_max so that the Einstein molecule at Lam_max is (mostly) overlap-free
     lam_max = a.lam_max
     for _ in range(8):
@@ -120,12 +146,12 @@ def main():
                                einstein_term_over_N=-(N - 1) * math.log(math.pi / a.lam_max) / N,
                                beta_dA1_over_N=dA1 / N, dA1_overlap_free_fraction=free_frac,
                                integral_over_N=I / N, integral_err_over_N=I_err / N),
-               lam_max_used=a.lam_max, v0=v0, msd_nodes={f"{lams[j]:.6g}": msd[j] for j in range(len(lams))},
+               lam_max_used=a.lam_max, v0=v0, sites=sites_info, msd_nodes={f"{lams[j]:.6g}": msd[j] for j in range(len(lams))},
                seconds=time.time() - t0)
     if a.kind == "hexlat":
         out["s_conf_lower_bound"] = math.log(2) / 3
         out["beta_g_tiling"] = bg - math.log(2) / 3
-    if a.kind == "dodeca":
+    if a.kind in ("dodeca", "dodeca1", "dodeca1_jam"):
         # independent fillings of each 12-gon of the 3.12.12 tiling: 4421 per 19 particles (exact lower bound)
         out["s_conf_lower_bound"] = math.log(4421) / 19
         out["beta_g_tiling"] = bg - math.log(4421) / 19

@@ -36,7 +36,7 @@ def main():
     ap.add_argument("--T", type=float, default=0.06)
     ap.add_argument("--T-schedule", default="")
     ap.add_argument("--P", type=float, default=0.735)
-    ap.add_argument("--init", default="rows", choices=["A", "B", "rows", "hexlat", "fluid"])
+    ap.add_argument("--init", default="rows", choices=["A", "B", "rows", "hexlat", "fluid", "dodeca", "dodeca1", "dodeca1_jam"])
     ap.add_argument("--N", type=int, default=2000)
     ap.add_argument("--sweeps", type=int, default=200000)
     ap.add_argument("--tune-sweeps", type=int, default=5000, help="tuning window at the start of each stage")

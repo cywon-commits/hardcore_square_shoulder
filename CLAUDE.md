@@ -1,4 +1,4 @@
-# CLAUDE.md — HCSS pilot 5 (1/T scaling of the lam < lam* deviation; lower end of the band)
+# CLAUDE.md — HCSS pilot 6 (jammed basin, kinetic trapping, lower end of the tiling band)
 
 ## Context
 2D hard-core square-shoulder model (sigma = 1, eps = 1, k_B = 1): r < 1 forbidden, 1 <= r < lam costs eps, r >= lam free.
@@ -12,10 +12,10 @@ lam = 1.93, P = 0.735 (T = 0.06, 0.08). Pilot 4 (README.md) tests the hard-conta
 - dodecagon_fillings.npz must stay next to hcss_mc.py.
 
 ## Workflow
-1. `pip install -r requirements.txt`; `python -m pytest -q test_hcss_mc.py test_flip.py test_fl.py` must give 16 passed.
-2. Copy or link the pilot-4 fe4/ directory here, then `NPROC=<cores> bash run_package5.sh` (writes fe5/*.json, summary5.txt, theory_window_kappa.{json,png}).
+1. `pip install -r requirements.txt`; `python -m pytest -q test_hcss_mc.py test_flip.py test_fl.py` must give 17 passed.
+2. `NPROC=<cores> bash run_package6.sh` (writes fe6/, npt6/, summary6.txt).
 3. If a Frenkel-Ladd run reports an overlap-free fraction < 0.8 or an infinite beta_g, rerun it with larger --lam-max and say so.
 
 ## Reporting
-- Report in Korean in `results5.md` following README sections 5-6, with tables (2-sigma errors) and figure paths.
+- Report in Korean in `results6.md` following README sections 5-6, with tables (2-sigma errors) and figure paths.
 - Do not edit the theory text or the prediction table in README.
