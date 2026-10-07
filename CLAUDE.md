@@ -1,4 +1,4 @@
-# CLAUDE.md — HCSS pilot 8 (order-parameter analysis)
+# CLAUDE.md — HCSS pilot 9 (corrected order parameters; stiffness convergence; fine melting scan)
 
 ## Context
 2D hard-core square-shoulder model; lam* = 2cos15. The tiling phases differ only by the phason strain E (w = alpha z + beta conj z,
@@ -12,7 +12,12 @@ The 12-fold state has eta = 0 (triangles : rhombi = 2/sqrt3, x_A = 0.366) — no
 
 ## Workflow
 1. `pip install -r requirements.txt`; run `python -m pytest -q test_op.py test_hcss_mc.py test_flip.py test_fl.py` (all must pass).
-2. Copy/link pilot-2 runs2/ and pilot-3 coex/ here, then `NPROC=<cores> bash run_package8.sh` (outputs in op8/).
+2. Copy/link pilot-2 runs2/ and pilot-3 coex/ here, then `NPROC=<cores> bash run_package9.sh` (outputs in op9/, melt9/).
 
 ## Reporting
-- Korean, in `results8.md`, following README section 5 (tables, figure paths, which predictions hold and which do not).
+- Korean, in `results9.md`, following README section 5 (tables, figure paths, which predictions hold and which do not).
+
+## Pilot-9 notes
+- eta is computed from the costly-pair count (Euler: n_A = 2N - 2 n_R), shoulder bonds obey the Gabriel condition,
+  psi_n use raw angles, tiling-MC flips use beta = 1e3. Do not revert these.
+- In the stiffness analysis, use the fluctuating part (variance) of w_q; report static fractions.

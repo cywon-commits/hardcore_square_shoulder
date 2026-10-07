@@ -4,6 +4,9 @@ Moves: (1) 30-degree hexagon flip (hcss_mc.flip_moves, point reflection; accepta
        (2) 12-gon refill: a regular 12-gon of side lam whose 13 interior vertices form one of the 4421 fillings is
            refilled with a uniformly chosen filling; acceptance n_old/n_new (number of such 12-gons).
 Positions are ideal (edge lam*(1+1e-7)); no vibrations.
+Flips use beta = 1e3: valid tiling flips have dU = 0 and are unaffected, while flips of hexagon-like but non-tiling
+local configurations (which would create extra costly pairs) are rejected. (beta = 1e-9 in pilots 8 and earlier
+symmetry tests let the tiling degrade; eta drifted.)
 """
 import sys, math, numpy as np
 sys.path.insert(0, __import__("os").path.dirname(__import__("os").path.abspath(__file__)))
@@ -98,7 +101,7 @@ class Tiling:
         return False
 
     def flip_sweep(self, n_attempt):
-        self.n_pairs, seen, prop, acc = mc.flip_moves(self.s, self.img, self.box, self.lam, 1e-9, n_attempt, self.n_pairs,
+        self.n_pairs, seen, prop, acc = mc.flip_moves(self.s, self.img, self.box, self.lam, 1e3, n_attempt, self.n_pairs,
                                                       int(self.rng.integers(1, 2**31 - 1)), 0.03, 0.03, 0.05, math.radians(3))
         return seen, prop, acc
 

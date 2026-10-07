@@ -30,33 +30,46 @@ def _images(P, M):
     return np.vstack(imgs), np.concatenate(oid), np.vstack(shift)
 
 
-def bonds(P, M, lam=1.93, tol_in=0.06, tol_out=0.25, tol_core=0.08, max_dev_deg=12.0):
-    """shoulder edges (i, j, k) with k = direction class of r_j - r_i in 30-degree units, and core pairs (i, j, angle)."""
+def bonds(P, M, lam=1.93, tol_in=0.06, tol_out=0.25, tol_core=0.08, max_dev_deg=12.0, return_raw=False):
+    """Shoulder edges (i, j, k): every undirected pair is found ONCE, its raw angle measured once, and quantised to a
+    30-degree class k relative to the local orientation (12-fold average of the bond angles at its two end vertices);
+    then both (i, j, k) and (j, i, k+6) are stored, so the two directions can never disagree (pilot-8 artefact).
+    Also returns core pairs (r < 1 + tol_core) and, if requested, the raw shoulder-bond angles."""
     Q, oid, _ = _images(P, M)
     tree = cKDTree(Q)
-    # global orientation offset theta0 (structures may be rotated): 12-fold average of shoulder-bond angles
-    acc = 0j
-    for i, p in enumerate(P[: min(len(P), 400)]):
-        for m in tree.query_ball_point(p, lam + tol_out):
-            d = Q[m] - p; r = math.hypot(*d)
-            if lam - tol_in <= r < lam + tol_out:
-                acc += cmath.exp(12j * math.atan2(d[1], d[0]))
-    theta0 = cmath.phase(acc) / 12 if abs(acc) > 0 else 0.0
-    L, C = [], []
+    raw = []                                     # (i, j, angle) for i < j (pairs with an image of itself are skipped)
+    C = []
     for i, p in enumerate(P):
         for m in tree.query_ball_point(p, lam + tol_out):
             j = oid[m]
-            d = Q[m] - p; r = math.hypot(*d)
-            if r < 1e-9 or j < i and False:
+            if j <= i:
                 continue
-            ang = math.atan2(d[1], d[0]) - theta0
+            d = Q[m] - p; r = math.hypot(*d)
             if lam - tol_in <= r < lam + tol_out:
-                k = int(round(ang / (math.pi / 6))) % 12
-                dev = abs(((ang - k * math.pi / 6) + math.pi) % (2 * math.pi) - math.pi)
-                if math.degrees(dev) <= max_dev_deg:
-                    L.append((i, j, k))
-            elif r < 1 + tol_core:
-                C.append((i, j, ang))
+                # Gabriel condition: no third particle inside the circle with diameter ij (a shoulder CONTACT has nothing
+                # in between; e.g. two collinear core steps, r ~ 2.0, are rejected).  A and B tile edges always pass
+                # (opposite angles 60 and 75 degrees < 90).
+                mid = p + d / 2
+                inside = [x for x in tree.query_ball_point(mid, r / 2 - 0.05) if oid[x] != i and oid[x] != j]
+                if not inside:
+                    raw.append((i, j, math.atan2(d[1], d[0])))
+            elif 1e-9 < r < lam - tol_in:
+                C.append((i, j, math.atan2(d[1], d[0])))      # all costly pairs (= energy count; core contacts in a tiling)
+    # orientation: global offset theta0 first, then a SMALL local deviation per vertex (no +-15 degree branch ambiguity)
+    tot = sum(cmath.exp(12j * a) for (_, _, a) in raw) if raw else 1
+    theta0 = cmath.phase(tot) / 12.0
+    acc = np.zeros(len(P), complex)
+    for (i, j, a) in raw:
+        z = cmath.exp(12j * (a - theta0)); acc[i] += z; acc[j] += z
+    dev = np.where(np.abs(acc) > 0, np.angle(acc) / 12.0, 0.0)
+    L = []
+    for (i, j, a) in raw:
+        off = theta0 + 0.5 * (dev[i] + dev[j])
+        x = (a - off) / (math.pi / 6); k = int(round(x)) % 12
+        if abs(x - round(x)) * 30.0 <= max_dev_deg:
+            L.append((i, j, k)); L.append((j, i, (k + 6) % 12))
+    if return_raw:
+        return L, C, raw
     return L, C
 
 
@@ -82,6 +95,21 @@ def eta_from_counts(nA, nB):
     nR = nB / 2.0
     den = nR / 2 + S3 * nA / 4
     return (nR / 2 - S3 * nA / 4) / den if den > 0 else float("nan")
+
+
+def psi_raw(raw, n):
+    """bond-orientational order from the UNQUANTISED shoulder-bond angles (each bond once; even n)."""
+    if not raw:
+        return 0j
+    return np.mean([cmath.exp(1j * n * a) for (_, _, a) in raw])
+
+
+def eta_from_core(N, n_R):
+    """exact eta for a periodic tiling: Euler gives 2N triangles = n_A + 2 n_R, so n_A = 2N - 2 n_R; n_R = number of costly
+    (core-contact) pairs, i.e. the energy count.  Robust against degenerate Delaunay choices and thermal misclassification."""
+    nA = 2 * N - 2 * n_R
+    den = n_R / 2 + S3 * nA / 4
+    return (n_R / 2 - S3 * nA / 4) / den if den > 0 else float("nan")
 
 
 def psi(L, n):
@@ -136,15 +164,17 @@ def order_parameters(P, M, lam=1.93, tol_in=0.06, tol_out=None, T=None, Pr=None)
     """global order parameters of one configuration (periodic box M with box vectors as columns)."""
     if tol_out is None:
         tol_out = 0.10 + 2.0 * T / (Pr * lam) if (T and Pr) else 0.25
-    L, C = bonds(P, M, lam, tol_in, tol_out)
+    L, C, raw = bonds(P, M, lam, tol_in, tol_out, return_raw=True)
     cnt, _ = tile_counts(P, M, lam, tol_in, tol_out)
     tot = sum(cnt.values())
-    eta = eta_from_counts(cnt["A"], cnt["B"])
+    eta_tiles = eta_from_counts(cnt["A"], cnt["B"])
+    eta = eta_from_core(len(P), len(C))
     lf = lift(P, M, L)
     out = dict(N=len(P), counts=cnt, x_A=cnt["A"] / tot, x_B=cnt["B"] / tot, x_other=(cnt["C"] + cnt["D"] + cnt["X"]) / tot,
-               eta=eta, psi2=abs(psi(L, 2)), psi4=abs(psi(L, 4)), psi6=abs(psi(L, 6)), psi12=abs(psi(L, 12)),
+               eta=eta, eta_tiles=eta_tiles, n_core_pairs_exact=len(C),
+               psi2=abs(psi_raw(raw, 2)), psi4=abs(psi_raw(raw, 4)), psi6=abs(psi_raw(raw, 6)), psi12=abs(psi_raw(raw, 12)),
                arg_psi4=float(np.angle(psi(L, 4))), arg_psi6=float(np.angle(psi(L, 6))),
-               n_shoulder_bonds=len(L) // 2, n_core_pairs=len(C) // 2,
+               n_shoulder_bonds=len(raw),
                lift_reached=lf["reached"], n_winding=lf["n_winding"], n_defect_edges=lf["n_defect_edges"])
     if "E" in lf:
         out.update(detE=lf["detE"], abs_alpha=abs(lf["alpha"]), abs_beta=abs(lf["beta"]), winding_residual=lf["winding_residual"],
@@ -154,7 +184,7 @@ def order_parameters(P, M, lam=1.93, tol_in=0.06, tol_out=None, T=None, Pr=None)
 
 def phason_spectrum(P, M, lf, nshell=6):
     """<|w_q|^2> for the residual w~ = w - E r (periodic if E is exact) on the smallest reciprocal vectors.
-    Returns list of (|q|, |w_q|^2) with w_q = (1/N) sum_j w~_j exp(-i q.r_j) (continuum normalisation)."""
+    Returns list of (|q|, w_q (complex), (m1, m2)) with w_q = (1/N) sum_j w~_j exp(-i q.r_j) (continuum normalisation)."""
     if "E" not in lf:
         return []
     r = lf["r"]; w = lf["w"]; ok = ~np.isnan(r.real)
@@ -171,7 +201,7 @@ def phason_spectrum(P, M, lf, nshell=6):
                 continue
             q = m1 * rec[:, 0] + m2 * rec[:, 1]
             wq = np.mean(wr * np.exp(-1j * (Pk @ q)))
-            out.append((float(np.linalg.norm(q)), float(abs(wq) ** 2)))
+            out.append((float(np.linalg.norm(q)), complex(wq), (m1, m2)))
     return out
 
 

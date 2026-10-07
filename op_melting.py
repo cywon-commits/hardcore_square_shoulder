@@ -9,10 +9,11 @@ Usage  python op_melting.py runs2/T0.04_rows runs2/T0.06_rows ... --last 2 --out
 import argparse, glob, json, os, math, cmath, numpy as np
 from scipy.spatial import cKDTree
 import op
-def local_psi(P, L, n=12):
+def local_psi(P, raw, n=12):
+    """per-particle psi_n from the UNQUANTISED angles of its Gabriel shoulder bonds (pilot 9 fix)."""
     acc = np.zeros(len(P), complex); c = np.zeros(len(P))
-    for (i, j, k) in L:
-        acc[i] += cmath.exp(1j * n * math.pi * k / 6); c[i] += 1
+    for (i, j, a) in raw:
+        z = cmath.exp(1j * n * a); acc[i] += z; acc[j] += z; c[i] += 1; c[j] += 1
     return acc / np.maximum(c, 1)
 def g_corr(P, M, f, rmax=14.0, nb=28, nsample=500):
     inv = np.linalg.inv(M); rng = np.random.default_rng(0); idx = rng.choice(len(P), min(len(P), nsample), replace=False)
@@ -38,13 +39,15 @@ def main():
         for f in sorted(glob.glob(os.path.join(run, "snap_*.npz")))[-a.last:]:
             z = np.load(f); P, M = z["pos"], z["box"]
             o, (L, lf) = op.order_parameters(P, M, lam=a.lam, tol_in=0.06, tol_out=tol_out)
-            r, g = g_corr(P, M, local_psi(P, L, 12))
+            _, _, raw = op.bonds(P, M, a.lam, 0.06, tol_out, return_raw=True)
+            r, g = g_corr(P, M, local_psi(P, raw, 12)); r6, g6 = g_corr(P, M, local_psi(P, raw, 6))
             rows.append(dict(run=run, snap=os.path.basename(f), T=T, eta=o["eta"], psi6=o["psi6"], psi12=o["psi12"], contact=1 - o["x_other"],
-                             g12_r10=float(g[np.argmin(np.abs(r - 10))]), S_peak_over_N=s_peak(P, M), defects=o["n_defect_edges"]))
-    rows.sort(key=lambda x: (x["run"].split("_")[-1], x["T"]))
-    print(f"{'run':24s} {'T':>5s} {'contact':>7s} {'eta':>7s} {'psi6':>6s} {'psi12':>6s} {'g12(10)':>7s} {'S/N':>7s} {'defects':>7s}")
+                             g12_r10=float(g[np.argmin(np.abs(r - 10))]), g6_r10=float(g6[np.argmin(np.abs(r6 - 10))]),
+                             S_peak_over_N=s_peak(P, M), defects=o["n_defect_edges"]))
+    rows.sort(key=lambda x: (x["run"].split("_")[-1], x["T"], x["snap"]))
+    print(f"{'run':24s} {'T':>5s} {'contact':>7s} {'eta':>7s} {'psi6':>6s} {'psi12':>6s} {'g12(10)':>7s} {'g6(10)':>7s} {'S/N':>7s} {'defects':>7s}")
     for x in rows:
-        print(f"{x['run'][-24:]:24s} {x['T']:5.2f} {x['contact']:7.3f} {x['eta']:+7.3f} {x['psi6']:6.3f} {x['psi12']:6.3f} {x['g12_r10']:7.3f} {x['S_peak_over_N']:7.4f} {x['defects']:7d}")
+        print(f"{x['run'][-24:]:24s} {x['T']:5.2f} {x['contact']:7.3f} {x['eta']:+7.3f} {x['psi6']:6.3f} {x['psi12']:6.3f} {x['g12_r10']:7.3f} {x['g6_r10']:7.3f} {x['S_peak_over_N']:7.4f} {x['defects']:7d}")
     json.dump(rows, open(a.out, "w"), indent=1, default=float)
 if __name__ == "__main__":
     main()
