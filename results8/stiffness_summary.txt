@@ -1,0 +1,4 @@
+op8/stiff_2x3_s1.json N 1590 K_sum/particle 4.531 moved 0.86 T=0.06: dP_sp=0.214 vs dP_FL=0.067 ok=True T=0.08: dP_sp=0.286 vs dP_FL=0.088 ok=True
+op8/stiff_2x3_s2.json N 1590 K_sum/particle 4.621 moved 0.86 T=0.06: dP_sp=0.219 vs dP_FL=0.067 ok=True T=0.08: dP_sp=0.292 vs dP_FL=0.088 ok=True
+op8/stiff_3x4_s1.json N 3180 K_sum/particle 8.697 moved 0.86 T=0.06: dP_sp=0.412 vs dP_FL=0.067 ok=True T=0.08: dP_sp=0.549 vs dP_FL=0.088 ok=True
+op8/stiff_3x4_s2.json N 3180 K_sum/particle 8.517 moved 0.86 T=0.06: dP_sp=0.403 vs dP_FL=0.067 ok=True T=0.08: dP_sp=0.537 vs dP_FL=0.088 ok=True

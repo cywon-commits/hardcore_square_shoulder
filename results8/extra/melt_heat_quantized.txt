@@ -1,0 +1,16 @@
+runs2/heat_hexlat
+ T=0.04 sweep=40000 contact 1.000 eta +0.072 psi6 0.507 psi12 1.000 g12(10) 1.000 S/N 0.5906 defects 0
+ T=0.05 sweep=80000 contact 0.980 eta +0.066 psi6 0.509 psi12 1.000 g12(10) 1.000 S/N 0.5898 defects 94
+ T=0.06 sweep=120000 contact 0.960 eta +0.069 psi6 0.512 psi12 1.000 g12(10) 1.000 S/N 0.6138 defects 336
+ T=0.08 sweep=160000 contact 0.907 eta +0.062 psi6 0.510 psi12 1.000 g12(10) 1.000 S/N 0.6258 defects 504
+ T=0.10 sweep=200000 contact 0.813 eta +0.069 psi6 0.509 psi12 1.000 g12(10) 0.998 S/N 0.5485 defects 644
+ T=0.12 sweep=240000 contact 0.659 eta +0.066 psi6 0.466 psi12 1.000 g12(10) 0.993 S/N 0.3108 defects 1028
+ T=0.15 sweep=280000 contact 0.503 eta +0.365 psi6 0.002 psi12 1.000 g12(10) 0.960 S/N 0.0061 defects 714
+runs2/cool_fluid
+ T=0.15 sweep=40000 contact 0.324 eta -0.449 psi6 0.054 psi12 1.000 g12(10) 0.956 S/N 0.0078 defects 320
+ T=0.12 sweep=80000 contact 0.362 eta -0.469 psi6 0.081 psi12 1.000 g12(10) 0.963 S/N 0.0100 defects 394
+ T=0.10 sweep=120000 contact 0.447 eta -0.554 psi6 0.117 psi12 1.000 g12(10) 0.970 S/N 0.0135 defects 572
+ T=0.08 sweep=160000 contact 0.527 eta -0.583 psi6 0.070 psi12 1.000 g12(10) 0.967 S/N 0.0103 defects 572
+ T=0.06 sweep=200000 contact 0.538 eta -0.592 psi6 0.083 psi12 1.000 g12(10) 0.971 S/N 0.0114 defects 592
+ T=0.05 sweep=240000 contact 0.562 eta -0.599 psi6 0.091 psi12 1.000 g12(10) 0.971 S/N 0.0121 defects 658
+ T=0.04 sweep=280000 contact 0.577 eta -0.596 psi6 0.079 psi12 1.000 g12(10) 0.969 S/N 0.0115 defects 798
